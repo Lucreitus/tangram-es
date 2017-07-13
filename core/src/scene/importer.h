@@ -8,7 +8,6 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 #include "yaml-cpp/yaml.h"
 #include "scene/scene.h"

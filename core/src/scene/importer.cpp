@@ -287,13 +287,6 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
     }
 }
 
-std::string Importer::getSceneString(const std::shared_ptr<Platform>& platform,
-                                     const Url& scenePath, const std::shared_ptr<Asset>& asset) {
-    if (!asset) { return "";}
-
-    return asset->readStringFromAsset(platform);
-}
-
 std::vector<Url> Importer::getResolvedImportUrls(const std::shared_ptr<Platform>& platform,
                                                  std::shared_ptr<Scene>& scene,
                                                  const Node& sceneNode, const Url& base) {

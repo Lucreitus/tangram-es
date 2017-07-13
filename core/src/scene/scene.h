@@ -2,6 +2,7 @@
 
 #include "scene/asset.h"
 #include "util/color.h"
+#include "util/fastmap.h"
 #include "util/url.h"
 #include "util/yamlHelper.h"
 #include "view/view.h"

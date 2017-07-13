@@ -1,54 +1,120 @@
 #include "scene/asset.h"
-#include "platform.h"
 #include "log.h"
+#include "platform.h"
 
-// Define MINIZ_NO_ZLIB_APIS to remove all ZLIB-style compression/decompression API's.
-#define MINIZ_NO_ZLIB_APIS
-// Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent conflicts against stock zlib.
-#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
-
+#define MINIZ_NO_ZLIB_APIS // Remove all ZLIB-style compression/decompression API's.
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES // Disable zlib names, to prevent conflicts against stock zlib.
 #include <miniz.h>
-
-#include <unordered_map>
-#include <tuple>
 
 namespace Tangram {
 
-struct ZipHandle {
-    ~ZipHandle();
-    std::unique_ptr<mz_zip_archive> archiveHandle;
-    std::unordered_map<std::string, std::pair<unsigned int, size_t>> fileInfo;
+struct ZipArchive {
 
-    // Path to the zip bundle (helps in resolving zip resource path)
-    std::string bundlePath = "";
-    std::vector<char> data;
+    struct Entry {
+        std::string path;
+        size_t uncompressedSize = 0;
+    };
+
+    ZipArchive() {
+        mz_zip_zero_struct(&archive);
+    }
+
+    ~ZipArchive() {
+        // Close the archive.
+        mz_zip_reader_end(&archive);
+    }
+
+    // Load a zip archive from its compressed data in memory. This creates a list of entries for
+    // the archive, but does not decompress any data. If the archive is successfully loaded this
+    // returns true, otherwise returns false.
+    bool loadFromMemory(std::vector<char> compressedArchiveData) {
+        // Initialize the buffer and archive with the input data.
+        buffer = std::move(compressedArchiveData);
+        if (!mz_zip_reader_init_mem(&archive, buffer.data(), buffer.size(), 0)) {
+            return false;
+        }
+        // Scan the archive entries into a list.
+        auto numberOfFiles = mz_zip_reader_get_num_files(&archive);
+        entries.reserve(numberOfFiles);
+        for (size_t i = 0; i < numberOfFiles; i++) {
+            Entry entry;
+            mz_zip_archive_file_stat stats;
+            if (mz_zip_reader_file_stat(&archive, i, &stats)) {
+                entry.path = stats.m_filename;
+                entry.uncompressedSize = stats.m_uncomp_size;
+            }
+            entries.push_back(entry);
+        }
+        return true;
+    }
+
+    // Find an entry in the archive for the given path and decompress it into memory, using the
+    // allocator provided. If an entry is found for the path and successfully decompressed this
+    // returns true, otherwise returns false.
+    bool decompressFile(const std::string& path, std::function<char*(size_t)> allocator) {
+        size_t index = 0;
+        for (; index < entries.size(); index++) {
+            auto& entry = entries[index];
+            if (entry.path == path) {
+                break;
+            }
+        }
+        if (index >= entries.size()) {
+            return false;
+        }
+        size_t outputSize = entries[index].uncompressedSize;
+        char* outputBuffer = allocator(outputSize);
+        if (!mz_zip_reader_extract_to_mem(&archive, index, outputBuffer, outputSize, 0)) {
+            return false;
+        }
+        return true;
+    }
+
+    // Archive data used by miniz.
+    mz_zip_archive archive;
+
+    // Buffer of compressed zip archive data.
+    std::vector<char> buffer;
+
+    // List of file entries in the archive.
+    std::vector<Entry> entries;
 };
 
-ZipHandle::~ZipHandle() {
-    if (archiveHandle) {
-        mz_zip_reader_end(archiveHandle.get());
+//
+// Asset Class Implementation
+//
+
+Asset::Asset(Url url) : m_url(url) {}
+
+std::vector<char> Asset::readBytes(const std::shared_ptr<Platform> &platform) const {
+    return platform->bytesFromFile(m_url.string().c_str());
+}
+
+std::shared_ptr<Asset> Asset::getRelativeAsset(Url url) const {
+    Url resolvedUrl = url.resolved(m_url);
+    return std::make_shared<Asset>(resolvedUrl);
+}
+
+//
+// ZippedAsset Class Implementation
+//
+
+ZippedAsset::ZippedAsset(Url url, std::vector<char> zippedData) : Asset(url) {
+    // Initialize the zip archive from the zipped data.
+    m_zipArchive = std::make_shared<ZipArchive>();
+    m_zipArchive->loadFromMemory(zippedData);
+
+    // Scan the archive for an entry to use as the root scene file. This asset represents that entry.
+    for (const auto& entry : m_zipArchive->entries) {
+        if (isBaseSceneYaml(entry.path)) {
+            m_pathInArchive = entry.path;
+        }
     }
 }
 
-
-/* Asset Class Implementation */
-Asset::Asset(std::string name) : m_name(name) {}
-
-std::vector<char> Asset::readBytesFromAsset(const std::shared_ptr<Platform> &platform) const {
-    return platform->bytesFromFile(m_name.c_str());
-}
-
-std::string Asset::readStringFromAsset(const std::shared_ptr<Platform> &platform) const {
-    return platform->stringFromFile(m_name.c_str());
-}
-
-
-/* ZippedAsset Class Implementation */
-ZippedAsset::ZippedAsset(std::string name, std::shared_ptr<ZipHandle> zipHandle, std::vector<char> zippedData) :
-        Asset(name),
-        m_zipHandle(zipHandle) {
-
-    buildZipHandle(zippedData);
+ZippedAsset::ZippedAsset(ZippedAsset& base, std::string path) : Asset(base.url()) {
+    m_zipArchive = base.m_zipArchive;
+    m_pathInArchive = path;
 }
 
 bool ZippedAsset::isBaseSceneYaml(const std::string& filePath) const {
@@ -60,126 +126,29 @@ bool ZippedAsset::isBaseSceneYaml(const std::string& filePath) const {
     return true;
 }
 
-void ZippedAsset::buildZipHandle(std::vector<char>& zipData) {
-
-    if (zipData.empty()) { return; }
-
-    m_zipHandle = std::make_shared<ZipHandle>();
-    m_zipHandle->archiveHandle.reset(new mz_zip_archive());
-    m_zipHandle->data.swap(zipData);
-
-    mz_zip_archive* zip = m_zipHandle->archiveHandle.get();
-    memset(zip, 0, sizeof(mz_zip_archive));
-    if (!mz_zip_reader_init_mem(zip, m_zipHandle->data.data(), m_zipHandle->data.size(), 0)) {
-        LOGE("ZippedAssetPackage: Could not open archive: %s", m_name.c_str());
-        m_zipHandle.reset();
-        return;
-    }
-
-    auto lastPathSegment = m_name.rfind('/');
-    m_zipHandle->bundlePath = (lastPathSegment == std::string::npos) ? "" : m_name.substr(0, lastPathSegment+1);
-
-    /* Instead of using mz_zip_reader_locate_file, maintaining a map of file name to index,
-     * for performance reasons.
-     * https://www.ncbi.nlm.nih.gov/IEB/ToolBox/CPP_DOC/lxr/source/src/util/compress/api/miniz/miniz.c
-     */
-    const auto& numFiles = mz_zip_reader_get_num_files(zip);
-    for (unsigned int i = 0; i < numFiles; i++) {
-        mz_zip_archive_file_stat st;
-        if (!mz_zip_reader_file_stat(zip, i, &st)) {
-            LOGE("ZippedAssetPackage: Could not read file stats: %s", st.m_filename);
-            continue;
-        }
-        if (isBaseSceneYaml(st.m_filename)) {
-            m_name = m_zipHandle->bundlePath + st.m_filename;
-        }
-        m_zipHandle->fileInfo[st.m_filename] = std::pair<unsigned int, size_t>(i, st.m_uncomp_size);
-    }
-}
-
-bool ZippedAsset::bytesFromAsset(const std::string& filePath, std::function<char*(size_t)> allocator) const{
-
-    auto pos = filePath.find(m_zipHandle->bundlePath);
-    if (pos != 0) {
-        LOGE("Invalid asset path: %s", m_name.c_str());
-        return false;
-    }
-
-    auto resourcePath = filePath.substr(m_zipHandle->bundlePath.size());
-    if (*resourcePath.begin() == '/') { resourcePath.erase(resourcePath.begin()); }
-
-    if (m_zipHandle->archiveHandle) {
-        mz_zip_archive* zip = m_zipHandle->archiveHandle.get();
-        auto it = m_zipHandle->fileInfo.find(resourcePath);
-
-        if (it != m_zipHandle->fileInfo.end()) {
-            std::size_t elementSize = it->second.second;
-            char* elementData = allocator(elementSize);
-
-            /* read file data directly to memory */
-            if (mz_zip_reader_extract_to_mem(zip, it->second.first, elementData, elementSize, 0)) {
-                if (!elementData) {
-                    LOGE("ZippedAssetPackage::loadAsset: Could not load archive asset: %s", filePath.c_str());
-                    return false;
-                }
-                return true;
-            }
-        }
-    }
-    return false;
-
-}
-
-std::vector<char> ZippedAsset::readBytesFromAsset(const std::shared_ptr<Platform>& platform,
-                                                  const std::string& filePath) const {
-
-    if (!m_zipHandle) { return {}; }
-
+std::vector<char> ZippedAsset::readBytes(const std::shared_ptr<Platform>& platform) const {
     std::vector<char> fileData;
+
+    if (!m_zipArchive) { return fileData; }
 
     auto allocator = [&](size_t size) {
         fileData.resize(size);
         return fileData.data();
     };
 
-    bytesFromAsset(filePath, allocator);
-
-    if (fileData.empty()) {
-        LOGE("Asset \"%s\" read resulted in no data read. Verify the path in the scene.", filePath.c_str());
+    if (!m_zipArchive->decompressFile(m_pathInArchive, allocator)) {
+        LOGE("Cannot read zip entry \"%s\". Verify the path in the scene.", m_pathInArchive.c_str());
     }
 
     return fileData;
 }
 
-std::vector<char> ZippedAsset::readBytesFromAsset(const std::shared_ptr<Platform> &platform) const {
-    return readBytesFromAsset(platform, m_name);
-}
-
-std::string ZippedAsset::readStringFromAsset(const std::shared_ptr<Platform>& platform,
-                                             const std::string& filePath) const {
-
-    if (!m_zipHandle) { return ""; }
-
-    std::string fileData;
-
-    auto allocator = [&](size_t size) {
-        fileData.resize(size);
-        return &fileData[0];
-    };
-
-    bytesFromAsset(filePath, allocator);
-
-    if (fileData.empty()) {
-        LOGE("Asset \"%s\" read resulted in no data read. Verify the path in the scene.", m_name.c_str());
+std::shared_ptr<Asset> ZippedAsset::getRelativeAsset(Url url) {
+    if (url.isAbsolute()) {
+        return std::make_shared<Asset>(url);
     }
-
-    return fileData;
+    // If the URL is not absolute then treat it as a relative URL into the same archive this asset is in.
+    return std::make_shared<ZippedAsset>(*this, url.path());
 }
 
-
-std::string ZippedAsset::readStringFromAsset(const std::shared_ptr<Platform> &platform) const {
-    return readStringFromAsset(platform, m_name);
-}
-
-
-}
+} // namespace Tangram

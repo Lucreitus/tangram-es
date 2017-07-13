@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/url.h"
+
 #include <string>
 #include <vector>
 #include <memory>
@@ -8,66 +10,52 @@
 namespace Tangram {
 
 class Platform;
-struct ZipHandle;
+struct ZipArchive;
 
-/*
- * An Asset class representing every asset loaded via the scene file
- */
+// Asset represents any file referenced by a scene.
 class Asset {
+
 public:
-    Asset(std::string name);
+    // Create an asset representing a file at the given URL.
+    Asset(Url url);
 
-    const std::string& name() const { return m_name; }
+    // Get the URL of this asset.
+    const Url& url() const { return m_url; }
 
-    // Non zipped asset
-    virtual std::shared_ptr<ZipHandle> zipHandle() const { return nullptr; }
+    // Read the contents of the asset into a buffer of bytes.
+    virtual std::vector<char> readBytes(const std::shared_ptr<Platform>& platform) const;
 
-    // returns the string from file
-    virtual std::string readStringFromAsset(const std::shared_ptr<Platform>& platform) const;
-
-    // returns the raw bytes from file
-    virtual std::vector<char> readBytesFromAsset(const std::shared_ptr<Platform>& platform) const;
+    // Get an asset representing a URL resolved against this asset.
+    virtual std::shared_ptr<Asset> getRelativeAsset(Url url) const;
 
 protected:
-    // Name of an asset (resolved path with respect to the parent scene file to which this asset belongs)
-    // Also used to read contents of the asset
-    std::string m_name;
+    // The URL from which this asset retrieves data. For a zipped file, this is the URL of the archive
+    // that contains the file.
+    Url m_url;
 };
 
-
-/*
- * A specialized asset representation for assets within a zip bundle
- */
+// ZippedAsset specializes Asset for files that are zip archives of scenes.
 class ZippedAsset : public Asset {
+
 public:
-    ZippedAsset(std::string name, std::shared_ptr<ZipHandle> zipHandle = nullptr, std::vector<char> zippedData = {});
+    // Creates an asset for a zip archive, representing a scene in zipped form.
+    ZippedAsset(Url url, std::vector<char> zippedData);
 
-    std::shared_ptr<ZipHandle> zipHandle() const override { return m_zipHandle; }
+    std::vector<char> readBytes(const std::shared_ptr<Platform>& platform) const override;
 
-    // builds zipHandle (if not already built, from raw Data)
-    void buildZipHandle(std::vector<char>& zippedData);
-
-    // returns the string from resource from asset's path (relative to zip bundle path) in zip archive
-    std::string readStringFromAsset(const std::shared_ptr<Platform>& platform) const override;
-
-    // returns the raw bytes from resource from asset's path (relative to zip bundle path) in zip archive
-    std::vector<char> readBytesFromAsset(const std::shared_ptr<Platform>& platform) const override;
-
-    // returns the string from file bundled within the zip archive
-    std::string readStringFromAsset(const std::shared_ptr<Platform>& platform, const std::string& filename) const;
-
-    // returns the bytes from file bundled within the zip archive
-    std::vector<char> readBytesFromAsset(const std::shared_ptr<Platform>& platform, const std::string& filename) const;
+    std::shared_ptr<Asset> getRelativeAsset(Url url) const override;
 
 private:
-    std::shared_ptr<ZipHandle> m_zipHandle = nullptr;
+
+    ZippedAsset(ZippedAsset& base, std::string path);
+
+    std::shared_ptr<ZipArchive> m_zipArchive;
+
+    std::string m_pathInArchive;
 
     // Check if the filePath is the base scene yaml
-    bool isBaseSceneYaml(const std::string& filePath) const ;
-
-    // read raw bytes from a bundled file
-    bool bytesFromAsset(const std::string& filename, std::function<char*(size_t)> _allocator) const ;
+    bool isBaseSceneYaml(const std::string& filePath) const;
 
 };
 
-}
+} // namespace Tangram
