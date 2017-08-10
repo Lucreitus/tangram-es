@@ -23,16 +23,9 @@ android {
                   '-DANDROID_TOOLCHAIN=clang',
                   '-DANDROID_STL=c++_shared'
         cppFlags '-std=c++14',
-                 '-pedantic',
                  '-fPIC',
                  '-fexceptions',
-                 '-frtti',
-                 //warnings
-                 '-Wall',
-                 '-Wignored-qualifiers',
-                 '-Wtype-limits',
-                 '-Wmissing-field-initializers',
-                 '-Wno-format-pedantic'
+                 '-frtti'
 
         abiFilters 'armeabi-v7a'
       }

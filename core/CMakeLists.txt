@@ -1,15 +1,4 @@
-# Defines the following cached variables
-#   - CORE_INCLUDE_DIRS, the path where to CORE headers are located
-#   - CORE_LIBRARY, the core library name
-
 project(tangramcore)
-
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # using regular Clang or AppleClang
-    list(APPEND CORE_CXX_FLAGS -Wno-gnu-anonymous-struct)
-    list(APPEND CORE_CXX_FLAGS -Wno-nested-anon-types)
-    list(APPEND CORE_CXX_FLAGS -Wno-gnu-zero-variadic-macro-arguments)
-endif()
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/tangram)
@@ -17,10 +6,6 @@ set(DEPS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps)
 set(GENERATED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/generated)
 
 set(CORE_LIBRARY tangramcore CACHE INTERNAL "core library name" FORCE)
-
-if (TANGRAM_WARN_ON_RULE_CONFLICT)
-  add_definitions(-DTANGRAM_WARN_ON_RULE_CONFLICT)
-endif()
 
 file(GLOB_RECURSE FOUND_SOURCES "${SOURCE_DIR}/*.cpp")
 file(GLOB_RECURSE FOUND_HEADERS "${SOURCE_DIR}/*.h")
@@ -80,11 +65,25 @@ target_include_directories(${CORE_LIBRARY}
 
 target_compile_options(${CORE_LIBRARY}
   PUBLIC
-  ${CORE_CXX_FLAGS})
+  -pedantic
+  -Wall)
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # using regular Clang or AppleClang
+    target_compile_options(${CORE_LIBRARY}
+      PUBLIC
+      -Wno-gnu-anonymous-struct
+      -Wno-nested-anon-types
+      -Wno-gnu-zero-variadic-macro-arguments)
+endif()
 
 target_compile_definitions(${CORE_LIBRARY}
   PUBLIC
   ${CORE_COMPILE_DEFS})
+
+if (TANGRAM_WARN_ON_RULE_CONFLICT)
+  add_definitions(-DTANGRAM_WARN_ON_RULE_CONFLICT)
+endif()
 
 # make groups for xcode
 group_recursive_sources(src "src")

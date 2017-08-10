@@ -16,6 +16,14 @@ add_library(${LIB_NAME} SHARED
 target_include_directories(${LIB_NAME} PUBLIC
   ${PROJECT_SOURCE_DIR}/core/deps/SQLiteCpp/sqlite3) # sqlite3ndk.cpp needs sqlite3.h
 
+target_compile_options(${LIB_NAME}
+  PUBLIC
+  -pedantic
+  -Wall
+  -Wignored-qualifiers
+  -Wtype-limits
+  -Wmissing-field-initializers)
+
 target_link_libraries(${LIB_NAME}
   PUBLIC
   ${CORE_LIBRARY}
