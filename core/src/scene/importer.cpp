@@ -12,7 +12,6 @@ using YAML::NodeType;
 
 namespace Tangram {
 
-
 Node Importer::applySceneImports(const std::shared_ptr<Platform>& platform,
                                  std::shared_ptr<Scene>& scene) {
 
@@ -21,11 +20,10 @@ Node Importer::applySceneImports(const std::shared_ptr<Platform>& platform,
     Url nextUrlToImport;
 
     if (!scene->yaml().empty()) {
-        // Load scene from yaml string
+        // Load scene from yaml string.
         processScene(platform, scene, sceneUrl, scene->yaml());
     } else {
-        // Load scene from yaml file
-        scene->createSceneAsset(platform, sceneUrl, Url(""), Url(""));
+        // Load scene from yaml file.
         m_sceneQueue.push_back(sceneUrl);
     }
 
@@ -37,17 +35,7 @@ Node Importer::applySceneImports(const std::shared_ptr<Platform>& platform,
         {
             std::unique_lock<std::mutex> lock(sceneMutex);
 
-            condition.wait(lock, [&, this]{
-                    if (m_sceneQueue.empty()) {
-                        // Not busy at all?
-                        if (activeDownloads == 0) { return true; }
-                    } else {
-                        // More work and not completely busy?
-                        if (activeDownloads < MAX_SCENE_DOWNLOAD) { return true; }
-                    }
-                    return false;
-                });
-
+            condition.wait(lock);
 
             if (m_sceneQueue.empty()) {
                 if (activeDownloads == 0) {
@@ -65,47 +53,17 @@ Node Importer::applySceneImports(const std::shared_ptr<Platform>& platform,
             }
         }
 
-        bool isZipped = (Url::getPathExtension(nextUrlToImport.path()) == "zip");
-        auto& asset = scene->assets()[nextUrlToImport.string()];
-        // An asset at this path must have been created by now.
-        assert(asset);
-
         activeDownloads++;
-        platform->startUrlRequest(nextUrlToImport, [&, nextUrlToImport](UrlResponse response) {
+        scene->startUrlRequest(platform, nextUrlToImport, [&, nextUrlToImport](UrlResponse response) {
             if (response.error) {
                 LOGE("Unable to retrieve '%s': %s", nextUrlToImport.string().c_str(), response.error);
             } else {
                 std::unique_lock<std::mutex> lock(sceneMutex);
-                processScene(nextUrlToImport, std::string(response.content.begin(), response.content.end()));
+                processScene(platform, scene, nextUrlToImport, response.content);
             }
             activeDownloads--;
             condition.notify_all();
         });
-
-#if 0
-        if (path.hasHttpScheme() && !asset->zipHandle()) {
-            activeDownloads++;
-            platform->startUrlRequest(path.string(), [&, isZipped, path](std::vector<char>&& rawData) {
-                // Running on download-thread
-                if (!rawData.empty()) {
-                    std::unique_lock<std::mutex> lock(sceneMutex);
-                    auto& asset = scene->assets()[path.string()];
-                    if (isZipped) {
-                        auto& zippedAsset = static_cast<ZippedAsset&>(*asset);
-                        zippedAsset.buildZipHandle(rawData);
-                        processScene(platform, scene, path, asset->readStringFromAsset(platform));
-                    } else {
-                        processScene(platform, scene, path, std::string(rawData.data(), rawData.size()));
-                    }
-                }
-                activeDownloads--;
-                condition.notify_all();
-            });
-        } else {
-            std::unique_lock<std::mutex> lock(sceneMutex);
-            processScene(platform, scene, path, getSceneString(platform, path, asset));
-        }
-#endif
     }
 
     Node root = Node();
@@ -118,7 +76,7 @@ Node Importer::applySceneImports(const std::shared_ptr<Platform>& platform,
 }
 
 void Importer::processScene(const std::shared_ptr<Platform>& platform, std::shared_ptr<Scene>& scene,
-        const Url& sceneUrl, const std::string &sceneString) {
+        const Url& sceneUrl, std::vector<char>& sceneContent) {
 
     LOGD("Process: '%s'", sceneUrl.string().c_str());
 
@@ -127,12 +85,41 @@ void Importer::processScene(const std::shared_ptr<Platform>& platform, std::shar
         return;
     }
 
+    Url baseUrl = sceneUrl;
+    std::string sceneString;
+    if (Url::getPathExtension(sceneUrl.path()) == "zip") {
+        // We're loading a scene from a zip archive!
+        // First, create an archive from the data.
+        ZipArchive zipArchive;
+        zipArchive.loadFromMemory(sceneContent);
+        // Find the "base" scene file in the archive entries.
+        for (const auto& entry : zipArchive.entries) {
+            auto ext = Url::getPathExtension(entry.path);
+            // The "base" scene file must have extension "yaml" or "yml" and be
+            // at the root directory of the archive (i.e. no '/' in path).
+            if ((ext == "yaml" || ext == "yml") && entry.path.find('/') == std::string::npos) {
+                // Found the base, now create a URL to resolve the contents.
+                baseUrl = Url("zip:///#" + sceneUrl.string());
+                // And extract the contents to the scene string.
+                zipArchive.decompressFile(entry.path, [&](size_t size) {
+                    sceneString.resize(size);
+                    return &sceneString[0];
+                });
+                break;
+            }
+        }
+        // Add the archive to the scene.
+        scene->addZipArchive(sceneUrl, zipArchive);
+    } else {
+        sceneString = std::string(sceneContent.data(), sceneContent.size());
+    }
+
     try {
         auto sceneNode = YAML::Load(sceneString);
 
         m_scenes[sceneUrl] = sceneNode;
 
-        for (const auto& import : getResolvedImportUrls(platform, scene, sceneNode, sceneUrl)) {
+        for (const auto& import : getResolvedImportUrls(platform, scene, sceneNode, baseUrl)) {
             m_sceneQueue.push_back(import);
         }
     } catch (YAML::ParserException e) {
@@ -180,7 +167,6 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
                 if (nodeIsPotentialUrl(textureUrlNode)) {
                     relativeUrl = textureUrlNode.Scalar();
                     textureUrlNode = Url(textureUrlNode.Scalar()).resolved(base).string();
-                    scene.createSceneAsset(platform, textureUrlNode.Scalar(), relativeUrl, base);
                 }
             }
         }
@@ -200,7 +186,6 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
                 if (nodeIsTextureUrl(texture, textures)) {
                     relativeUrl = texture.Scalar();
                     texture = Url(texture.Scalar()).resolved(base).string();
-                    scene.createSceneAsset(platform, texture.Scalar(), relativeUrl, base);
                 }
             }
 
@@ -214,7 +199,6 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
                             if (nodeIsTextureUrl(matTexture, textures)) {
                                 relativeUrl = matTexture.Scalar();
                                 matTexture = Url(matTexture.Scalar()).resolved(base).string();
-                                scene.createSceneAsset(platform, matTexture.Scalar(), relativeUrl, base);
                             }
                         }
                     }
@@ -230,13 +214,11 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
                         if (nodeIsTextureUrl(uniformValue, textures)) {
                             relativeUrl = uniformValue.Scalar();
                             uniformValue = Url(uniformValue.Scalar()).resolved(base).string();
-                            scene.createSceneAsset(platform, uniformValue.Scalar(), relativeUrl, base);
                         } else if (uniformValue.IsSequence()) {
                             for (Node u : uniformValue) {
                                 if (nodeIsTextureUrl(u, textures)) {
                                     relativeUrl = u.Scalar();
                                     u = Url(u.Scalar()).resolved(base).string();
-                                    scene.createSceneAsset(platform, u.Scalar(), relativeUrl, base);
                                 }
                             }
                         }
@@ -270,7 +252,6 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
                     if (nodeIsPotentialUrl(urlNode)) {
                         relativeUrl = urlNode.Scalar();
                         urlNode = Url(urlNode.Scalar()).resolved(base).string();
-                        scene.createSceneAsset(platform, urlNode.Scalar(), relativeUrl, base);
                     }
                 } else if (font.second.IsSequence()) {
                     for (auto& fontNode : font.second) {
@@ -278,7 +259,6 @@ void Importer::resolveSceneUrls(const std::shared_ptr<Platform>& platform, Scene
                         if (nodeIsPotentialUrl(urlNode)) {
                             relativeUrl = urlNode.Scalar();
                             urlNode = Url(urlNode.Scalar()).resolved(base).string();
-                            scene.createSceneAsset(platform, urlNode.Scalar(), relativeUrl, base);
                         }
                     }
                 }
@@ -296,13 +276,11 @@ std::vector<Url> Importer::getResolvedImportUrls(const std::shared_ptr<Platform>
     if (const Node& import = sceneNode["import"]) {
         if (import.IsScalar()) {
             auto resolvedUrl = Url(import.Scalar()).resolved(base);
-            scene->createSceneAsset(platform, resolvedUrl, import.Scalar(), base);
             scenePaths.push_back(resolvedUrl);
         } else if (import.IsSequence()) {
             for (const auto& path : import) {
                 if (path.IsScalar()) {
                     auto resolvedUrl = Url(path.Scalar()).resolved(base);
-                    scene->createSceneAsset(platform, resolvedUrl, path.Scalar(), base);
                     scenePaths.push_back(resolvedUrl);
                 }
             }

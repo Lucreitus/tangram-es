@@ -1,6 +1,7 @@
 #include "osxPlatform.h"
 #include "gl/hardware.h"
 #include "log.h"
+#include "platform_gl.h"
 
 #import <cstdarg>
 #import <cstdio>

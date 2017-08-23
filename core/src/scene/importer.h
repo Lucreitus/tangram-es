@@ -15,7 +15,6 @@
 namespace Tangram {
 
 class Platform;
-class Asset;
 
 class Importer {
 
@@ -32,7 +31,7 @@ public:
 protected:
 
     void processScene(const std::shared_ptr<Platform>& platform, std::shared_ptr<Scene>& scene,
-                      const Url& scenePath, const std::string& sceneString);
+                      const Url& sceneUrl, std::vector<char>& sceneContent);
 
     // Get the sequence of scene names that are designated to be imported into the
     // input scene node by its 'import' fields.
@@ -49,8 +48,6 @@ protected:
     std::unordered_map<Url, Node> m_scenes;
 
     std::vector<Url> m_sceneQueue;
-
-    const unsigned int MAX_SCENE_DOWNLOAD = 4;
 };
 
 }

@@ -567,11 +567,11 @@ std::shared_ptr<Texture> SceneLoader::fetchTexture(const std::shared_ptr<Platfor
     std::shared_ptr<Texture> texture;
 
     Url url(urlString);
-    
+
     auto& asset = scene->sceneAssets()[url];
     // asset must exist for this path (must be created during scene importing)
     assert(asset);
-    
+
     // FIXME: Zip assets aren't handled by the paths below.
 
     if (url.hasBase64Data() && url.mediaType() == "image/png") {
@@ -599,7 +599,7 @@ std::shared_ptr<Texture> SceneLoader::fetchTexture(const std::shared_ptr<Platfor
         }
     } else {
         scene->pendingTextures++;
-        platform->startUrlRequest(url, [=](UrlResponse response) {
+        scene->startUrlRequest(platform, url, [=](UrlResponse response) {
                 if (response.error) {
                     LOGE("Error retrieving URL '%s': %s", url.string().c_str(), response.error);
                 }
@@ -728,12 +728,12 @@ void loadFontDescription(const std::shared_ptr<Platform>& platform, const Node& 
     auto& asset = scene->sceneAssets()[_ft.uri];
     // asset must exist for this path (must be created during scene importing)
     assert(asset);
-    
+
     // FIXME: Zip assets aren't handled by the URL request below.
-    
+
     // Load font file.
     scene->pendingFonts++;
-    platform->startUrlRequest(url, [_ft, scene](UrlResponse response) {
+    scene->startUrlRequest(platform, url, [_ft, scene](UrlResponse response) {
         if (response.error) {
             LOGE("Error retrieving font '%s' at %s: ", _ft.alias.c_str(), _ft.uri.c_str(), response.error);
         } else {
