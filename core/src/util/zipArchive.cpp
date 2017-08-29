@@ -8,7 +8,7 @@ ZipArchive::ZipArchive() {
 
 ZipArchive::~ZipArchive() {
     // Close the archive.
-    mz_zip_reader_end(&archive);
+    // mz_zip_reader_end(&archive);
 }
 
 // Load a zip archive from its compressed data in memory. This creates a list of entries for

@@ -57,9 +57,9 @@ std::mutex SceneLoader::m_textureMutex;
 bool SceneLoader::loadScene(const std::shared_ptr<Platform>& _platform, std::shared_ptr<Scene> _scene,
                             const std::vector<SceneUpdate>& _updates) {
 
-    Importer sceneImporter;
+    Importer sceneImporter(_scene);
 
-    _scene->config() = sceneImporter.applySceneImports(_platform, _scene);
+    _scene->config() = sceneImporter.applySceneImports(_platform);
 
     if (!_scene->config()) {
         return false;
@@ -105,8 +105,7 @@ bool SceneLoader::applyUpdates(const std::shared_ptr<Platform>& platform, Scene&
         }
     }
 
-    Importer importer;
-    importer.resolveSceneUrls(platform, scene, root, Url(scene.path()).resolved(Url(scene.resourceRoot())));
+    Importer::resolveSceneUrls(root, scene.url());
 
     return true;
 }
@@ -568,12 +567,6 @@ std::shared_ptr<Texture> SceneLoader::fetchTexture(const std::shared_ptr<Platfor
 
     Url url(urlString);
 
-    auto& asset = scene->sceneAssets()[url];
-    // asset must exist for this path (must be created during scene importing)
-    assert(asset);
-
-    // FIXME: Zip assets aren't handled by the paths below.
-
     if (url.hasBase64Data() && url.mediaType() == "image/png") {
         auto data = url.data();
 
@@ -724,12 +717,6 @@ void loadFontDescription(const std::shared_ptr<Platform>& platform, const Node& 
     FontDescription _ft(familyNormalized, styleNormalized, weight, uri);
 
     Url url(uri);
-
-    auto& asset = scene->sceneAssets()[_ft.uri];
-    // asset must exist for this path (must be created during scene importing)
-    assert(asset);
-
-    // FIXME: Zip assets aren't handled by the URL request below.
 
     // Load font file.
     scene->pendingFonts++;
