@@ -1,50 +1,65 @@
 #pragma once
 
-#include <functional>
-#include <string>
-#include <vector>
-
 #define MINIZ_NO_ZLIB_APIS // Remove all ZLIB-style compression/decompression API's.
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES // Disable zlib names, to prevent conflicts against stock zlib.
 #include <miniz.h>
+
+#include <string>
+#include <vector>
 
 namespace Tangram {
 
 class ZipArchive {
 
 public:
-    // Create an uninitialized archive.
-    ZipArchive();
 
-    // Dispose an archive and any memory it owns.
-    ~ZipArchive();
-
-    // Load a zip archive from its compressed data in memory. This creates a list of entries for
-    // the archive, but does not decompress any data. If the archive is successfully loaded this
-    // returns true, otherwise returns false. The data is moved out of the input vector and
-    // retained by the archive until other data is loaded or the archive is destroyed.
-    bool loadFromMemory(std::vector<char> compressedArchiveData);
-
-    // Find an entry in the archive for the given path and decompress it into memory, using the
-    // allocator provided. If an entry is found for the path and successfully decompressed this
-    // returns true, otherwise returns false.
-    bool decompressFile(const std::string& path, std::function<char*(size_t)> allocator);
-
-
-    // Buffer of compressed zip archive data.
-    std::vector<char> buffer;
-
+    // An Entry represents a compressed file in a ZipArchive.
     struct Entry {
         std::string path;
         size_t uncompressedSize = 0;
     };
 
-    // List of file entries in the archive.
-    std::vector<Entry> entries;
+    // Create an empty archive.
+    ZipArchive();
+
+    // Dispose an archive and any memory it owns.
+    ~ZipArchive();
+
+    // Copying would cause memory errors on the internal archive pointer.
+    ZipArchive(const ZipArchive& other) = delete;
+
+    // Load a zip archive from its compressed data in memory. This creates a
+    // list of entries for the archive, but does not decompress any data. If the
+    // archive is successfully loaded this returns true, otherwise returns
+    // false. The data is moved out of the input vector and retained until other
+    // data is loaded or the archive is destroyed.
+    bool loadFromMemory(std::vector<char> compressedArchiveData);
+
+    // Empty the archive.
+    void reset();
+
+    // Get a read-only list of the entries in the archive.
+    const std::vector<Entry>& entries() const { return entryList; }
+
+    // Return a pointer to the entry for the given path, or null if there is no
+    // entry for the path.
+    const Entry* findEntry(const std::string& path) const;
+
+    // Decompress the data from the given entry into the output buffer. The
+    // caller MUST ensure that the output has enough space allocated to store
+    // the uncompressed size of the entry. Returns false if the entry is not
+    // from this archive or it can't be decompressed, otherwise returns true.
+    bool decompressEntry(const Entry* entry, char* output);
 
 protected:
+    // Buffer of compressed zip archive data.
+    std::vector<char> buffer;
+
+    // List of file entries in the archive.
+    std::vector<Entry> entryList;
+
     // Archive data used by miniz.
-    mz_zip_archive archive;
+    mz_zip_archive minizData;
 };
 
 } // namespace Tangram

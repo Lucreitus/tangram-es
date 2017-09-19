@@ -14,6 +14,7 @@
 #include "util/mapProjection.h"
 #include "util/util.h"
 #include "util/url.h"
+#include "util/zipArchive.h"
 #include "view/view.h"
 
 #include <algorithm>
@@ -86,18 +87,23 @@ UrlRequestHandle Scene::startUrlRequest(std::shared_ptr<Platform> platform, Url 
     if (url.scheme() == "zip") {
         UrlResponse response;
         // URL for a file in a zip archive, get the source URL from the fragment.
-        auto source = Url(url.fragment());
+        auto encodedSourceUrl = url.netLocation();
+        auto source = Url(Url::unEscapeReservedCharacters(encodedSourceUrl));
         // Search for the source URL in our archive map.
         auto it = m_zipArchives.find(source);
         if (it != m_zipArchives.end()) {
             auto& archive = it->second;
             // Found the archive! Now create a response for the request.
-            bool success = archive.decompressFile(url.path(), [&](size_t size) {
-                response.content.resize(size);
-                return response.content.data();
-            });
-            if (!success) {
-                response.error = "Unable to decompress zip archive file.";
+            auto zipEntryPath = url.path().substr(1);
+            auto entry = archive->findEntry(zipEntryPath);
+            if (entry) {
+                response.content.resize(entry->uncompressedSize);
+                bool success = archive->decompressEntry(entry, response.content.data());
+                if (!success) {
+                    response.error = "Unable to decompress zip archive file.";
+                }
+            } else {
+                response.error = "Did not find zip archive entry.";
             }
         } else {
             response.error = "Could not find zip archive.";
@@ -105,13 +111,13 @@ UrlRequestHandle Scene::startUrlRequest(std::shared_ptr<Platform> platform, Url 
         callback(response);
         return 0;
     }
+
     // For non-zip URLs, send it to the platform.
     return platform->startUrlRequest(url, callback);
 }
 
-void Scene::addZipArchive(Url url, ZipArchive zipArchive) {
-    // TODO: copying the archive here is probably slow - maybe implement move?
-    m_zipArchives[url] = zipArchive;
+void Scene::addZipArchive(Url url, std::shared_ptr<ZipArchive> zipArchive) {
+    m_zipArchives.emplace(url, zipArchive);
 }
 
 int Scene::addIdForName(const std::string& _name) {

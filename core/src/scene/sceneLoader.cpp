@@ -591,27 +591,26 @@ std::shared_ptr<Texture> SceneLoader::fetchTexture(const std::shared_ptr<Platfor
             LOGE("Invalid Base64 texture");
         }
     } else {
-        scene->pendingTextures++;
-        scene->startUrlRequest(platform, url, [=](UrlResponse response) {
-                if (response.error) {
-                    LOGE("Error retrieving URL '%s': %s", url.string().c_str(), response.error);
-                }
-                std::lock_guard<std::mutex> lock(m_textureMutex);
-                auto texture = scene->getTexture(name);
-                if (texture) {
-                    if (!texture->loadImageFromMemory(std::move(response.content))) {
-                        LOGE("Invalid texture data from URL '%s'", url.string().c_str());
-                    }
-
-                    updateSpriteNodes(name, texture, scene);
-                    scene->pendingTextures--;
-                    if (scene->pendingTextures == 0) {
-                        platform->requestRender();
-                    }
-                }
-            });
         std::vector<char> textureData = {};
         texture = std::make_shared<Texture>(textureData, options, generateMipmaps);
+
+        scene->pendingTextures++;
+        scene->startUrlRequest(platform, url, [&](UrlResponse response) {
+                if (response.error) {
+                    LOGE("Error retrieving URL '%s': %s", url.string().c_str(), response.error);
+                } else {
+                    if (texture) {
+                        if (!texture->loadImageFromMemory(std::move(response.content))) {
+                            LOGE("Invalid texture data from URL '%s'", url.string().c_str());
+                        }
+                        updateSpriteNodes(name, texture, scene);
+                        if (scene->pendingTextures == 0) {
+                            platform->requestRender();
+                        }
+                    }
+                }
+                scene->pendingTextures--;
+            });
     }
 
     return texture;
@@ -620,15 +619,13 @@ std::shared_ptr<Texture> SceneLoader::fetchTexture(const std::shared_ptr<Platfor
 bool SceneLoader::loadTexture(const std::shared_ptr<Platform>& platform, const std::string& url, const std::shared_ptr<Scene>& scene) {
     TextureOptions options = {GL_RGBA, GL_RGBA, {GL_LINEAR, GL_LINEAR}, {GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE}};
 
+    std::lock_guard<std::mutex> lock(m_textureMutex);
+    auto emplaceResult = scene->textures().emplace(url, nullptr);
+    auto textureIt = emplaceResult.first;
     auto texture = fetchTexture(platform, url, url, options, false, scene);
-    if (texture) {
-        std::lock_guard<std::mutex> lock(m_textureMutex);
-        scene->textures().emplace(url, texture);
-        return true;
-    }
+    textureIt->second = texture;
 
-    LOGE("Missing texture %s", url.c_str());
-    return false;
+    return true;
 }
 
 void SceneLoader::loadTexture(const std::shared_ptr<Platform>& platform, const std::pair<Node, Node>& node, const std::shared_ptr<Scene>& scene) {

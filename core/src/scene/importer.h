@@ -39,11 +39,11 @@ protected:
     void addSceneData(const Url& sceneUrl, std::vector<char>& sceneContent);
 
     // Process and store data for an imported scene from a string of YAML.
-    void addSceneString(const Url& sceneUrl, const std::string& sceneString);
+    void addSceneString(const Url& baseUrl, const Url& sceneUrl, const std::string& sceneString);
 
     // Get the sequence of scene names that are designated to be imported into the
     // input scene node by its 'import' fields.
-    std::vector<Url> getResolvedImportUrls(const Node& sceneNode, const Url& base);
+    std::vector<Url> getImportUrls(const Node& sceneNode);
 
     // loads all the imported scenes and the master scene and returns a unified YAML root node.
     void importScenesRecursive(Node& root, const Url& sceneUrl, std::vector<Url>& sceneStack);

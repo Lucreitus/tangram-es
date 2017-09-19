@@ -464,7 +464,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 
 void dropCallback(GLFWwindow* window, int count, const char** paths) {
 
-    sceneFile = std::string(paths[0]);
+    sceneFile = std::string("file://") + paths[0];
     sceneYaml.clear();
 
     loadSceneFile();

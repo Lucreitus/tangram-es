@@ -5,7 +5,6 @@
 #include "util/color.h"
 #include "util/url.h"
 #include "util/yamlHelper.h"
-#include "util/zipArchive.h"
 #include "view/view.h"
 
 #include <atomic>
@@ -32,6 +31,7 @@ class SpriteAtlas;
 class Style;
 class Texture;
 class TileSource;
+class ZipArchive;
 struct Stops;
 
 // Delimiter used in sceneloader for style params and layer-sublayer naming
@@ -124,7 +124,7 @@ public:
     // requested.
     UrlRequestHandle startUrlRequest(std::shared_ptr<Platform> platform, Url url, UrlCallback callback);
 
-    void addZipArchive(Url url, ZipArchive zipArchive);
+    void addZipArchive(Url url, std::shared_ptr<ZipArchive> zipArchive);
 
     void updateTime(float _dt) { m_time += _dt; }
     float time() const { return m_time; }
@@ -179,7 +179,7 @@ private:
     // Container for any zip archives needed for the scene. For each entry, the
     // key is the original URL from which the zip archive was retrieved and the
     // value is a ZipArchive initialized with the compressed archive data.
-    std::unordered_map<Url, ZipArchive> m_zipArchives;
+    std::unordered_map<Url, std::shared_ptr<ZipArchive>> m_zipArchives;
 
     // Records the YAML Nodes for which global values have been swapped; keys are
     // nodes that referenced globals, values are nodes of globals themselves.
